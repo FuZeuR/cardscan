@@ -43,15 +43,21 @@
   .camera-wrap { position:relative; width:100%; aspect-ratio:4/3; background:#000; display:flex; align-items:center; justify-content:center; }
   #video { width:100%; height:100%; object-fit:cover; display:none; }
   #canvas { display:none; }
+  #previewCanvas { display:none; width:100%; height:100%; object-fit:contain; position:absolute; inset:0; background:#000; }
+
   .camera-placeholder { display:flex; flex-direction:column; align-items:center; gap:10px; color:var(--muted); }
   .camera-placeholder svg { opacity:0.4; }
 
   .scan-overlay { position:absolute; inset:0; pointer-events:none; display:none; }
   .scan-overlay.active { display:block; }
+
+  /* Zone de scan repositionnée en bas à gauche — là où est le numéro Pokémon */
   .scan-frame {
-    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-    width:220px; height:55px; border:2px solid var(--accent); border-radius:6px;
-    box-shadow:0 0 0 2000px rgba(0,0,0,0.5);
+    position:absolute;
+    bottom:18%; left:50%; transform:translateX(-50%);
+    width:75%; height:18%;
+    border:2px solid var(--accent); border-radius:6px;
+    box-shadow:0 0 0 2000px rgba(0,0,0,0.55);
   }
   .scan-line {
     position:absolute; top:0; left:0; right:0; height:2px;
@@ -59,7 +65,21 @@
     box-shadow:0 0 8px var(--accent);
   }
   @keyframes scanline { 0%{top:0} 50%{top:calc(100% - 2px)} 100%{top:0} }
-  .scan-hint { position:absolute; bottom:10px; left:0; right:0; text-align:center; font-size:11px; color:rgba(255,255,255,0.7); font-family:'DM Mono',monospace; }
+  .scan-hint {
+    position:absolute; bottom:6px; left:0; right:0;
+    text-align:center; font-size:10px; color:rgba(255,255,255,0.8);
+    font-family:'DM Mono',monospace;
+  }
+
+  /* Indicateur de zoom */
+  .zoom-badge {
+    position:absolute; top:10px; right:10px;
+    background:rgba(0,0,0,0.6); border:1px solid var(--accent);
+    border-radius:6px; padding:3px 8px;
+    font-size:11px; color:var(--accent); font-family:'DM Mono',monospace;
+    display:none;
+  }
+  .zoom-badge.visible { display:block; }
 
   .scanner-controls { padding:14px 16px; display:flex; gap:10px; }
   .btn-main {
@@ -164,6 +184,7 @@
     <div class="camera-wrap">
       <video id="video" autoplay playsinline></video>
       <canvas id="canvas"></canvas>
+      <canvas id="previewCanvas"></canvas>
       <div class="camera-placeholder" id="placeholder">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
@@ -173,8 +194,9 @@
       </div>
       <div class="scan-overlay" id="scanOverlay">
         <div class="scan-frame"><div class="scan-line"></div></div>
-        <div class="scan-hint">Cadre le numéro en bas de la carte (ex: 025/198)</div>
+        <div class="scan-hint">⬇ Place le numéro de carte dans le cadre ⬇</div>
       </div>
+      <div class="zoom-badge" id="zoomBadge">🔍 x3</div>
     </div>
     <div class="scanner-controls">
       <button class="btn-main btn-scan" id="btnScan" onclick="startCamera()">
@@ -250,17 +272,40 @@
 
 <script>
 let stream = null;
+let videoTrack = null;
 const LANG_LABELS = { F:'Français', G:'Allemand', E:'Anglais', I:'Italien', S:'Espagnol', P:'Portugais', J:'Japonais' };
 const COND_LABELS = { EX:'Excellent', NM:'Near Mint', GD:'Bon état', LP:'Légèrement joué', PL:'Joué', PO:'Pauvre' };
 
 // ── CAMÉRA ──────────────────────────────────────────
 async function startCamera() {
   try {
+    // Demande la résolution max pour avoir le plus de détails possible
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode:'environment', width:{ideal:1280}, height:{ideal:960} }
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 3264 },
+        height: { ideal: 2448 },
+      }
     });
+
     const video = document.getElementById('video');
     video.srcObject = stream;
+    videoTrack = stream.getVideoTracks()[0];
+
+    // Tentative d'activation du zoom x3 sur Samsung A15
+    try {
+      const capabilities = videoTrack.getCapabilities();
+      if (capabilities.zoom) {
+        const maxZoom = capabilities.zoom.max;
+        const targetZoom = Math.min(3, maxZoom);
+        await videoTrack.applyConstraints({ advanced: [{ zoom: targetZoom }] });
+        document.getElementById('zoomBadge').textContent = `🔍 x${targetZoom}`;
+        document.getElementById('zoomBadge').classList.add('visible');
+      }
+    } catch(e) {
+      // Zoom non supporté, on continue sans
+    }
+
     video.style.display = 'block';
     document.getElementById('placeholder').style.display = 'none';
     document.getElementById('scanOverlay').classList.add('active');
@@ -273,10 +318,12 @@ async function startCamera() {
 }
 
 function stopCamera() {
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; videoTrack = null; }
   document.getElementById('video').style.display = 'none';
+  document.getElementById('previewCanvas').style.display = 'none';
   document.getElementById('placeholder').style.display = 'flex';
   document.getElementById('scanOverlay').classList.remove('active');
+  document.getElementById('zoomBadge').classList.remove('visible');
   document.getElementById('btnScan').style.display = 'flex';
   document.getElementById('btnCapture').style.display = 'none';
   document.getElementById('btnStop').style.display = 'none';
@@ -285,10 +332,54 @@ function stopCamera() {
 async function captureAndSearch() {
   const video = document.getElementById('video');
   const canvas = document.getElementById('canvas');
+
+  // Capture pleine résolution
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video, 0, 0);
-  const imageData = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+
+  // ── Recadrage sur la zone du numéro ──
+  // Le numéro Pokémon est dans la bande inférieure de la carte
+  // On recadre les 20% inférieurs et les 80% centraux horizontalement
+  const cropX = Math.floor(canvas.width * 0.05);
+  const cropY = Math.floor(canvas.height * 0.72);
+  const cropW = Math.floor(canvas.width * 0.90);
+  const cropH = Math.floor(canvas.height * 0.22);
+
+  const cropCanvas = document.createElement('canvas');
+  // On agrandit x2 pour améliorer la lisibilité
+  cropCanvas.width = cropW * 2;
+  cropCanvas.height = cropH * 2;
+  const cropCtx = cropCanvas.getContext('2d');
+
+  // Agrandissement avec interpolation
+  cropCtx.imageSmoothingEnabled = true;
+  cropCtx.imageSmoothingQuality = 'high';
+  cropCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW * 2, cropH * 2);
+
+  // ── Amélioration du contraste ──
+  const imgData = cropCtx.getImageData(0, 0, cropCanvas.width, cropCanvas.height);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    // Conversion en niveaux de gris pondérés
+    const gray = d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114;
+    // Contraste fort : seuillage adaptatif
+    const enhanced = gray > 128 ? Math.min(255, gray * 1.3) : Math.max(0, gray * 0.7);
+    d[i] = d[i+1] = d[i+2] = enhanced;
+  }
+  cropCtx.putImageData(imgData, 0, 0);
+
+  // Aperçu de ce qui est envoyé
+  const preview = document.getElementById('previewCanvas');
+  preview.width = cropCanvas.width;
+  preview.height = cropCanvas.height;
+  preview.getContext('2d').drawImage(cropCanvas, 0, 0);
+  video.style.display = 'none';
+  document.getElementById('scanOverlay').classList.remove('active');
+  preview.style.display = 'block';
+
+  const imageData = cropCanvas.toDataURL('image/jpeg', 0.95).split(',')[1];
   stopCamera();
   showLoading("Lecture du numéro de carte...");
 
@@ -303,7 +394,7 @@ async function captureAndSearch() {
           role: "user",
           content: [
             { type:"image", source:{ type:"base64", media_type:"image/jpeg", data:imageData } },
-            { type:"text", text:'Lis le numéro et le nom de cette carte Pokémon. Réponds UNIQUEMENT en JSON: {"name":"Dracaufeu","number":"025/198","set":"SVI"} ou {"error":"non trouvé"}' }
+            { type:"text", text:'Ceci est un recadrage de la zone inférieure d\'une carte Pokémon. Lis le numéro de carte (format ex: 025/198 ou 006/165) et le nom du Pokémon si visible. Réponds UNIQUEMENT en JSON: {"name":"Dracaufeu","number":"025/198"} ou {"error":"non trouvé"}' }
           ]
         }]
       })
@@ -313,7 +404,7 @@ async function captureAndSearch() {
     const match = text.match(/\{[\s\S]*?\}/);
     if (!match) throw new Error("Lecture impossible");
     const parsed = JSON.parse(match[0]);
-    if (parsed.error) throw new Error("Numéro non lisible, essaie la recherche manuelle");
+    if (parsed.error) throw new Error("Numéro non lisible — essaie la recherche manuelle");
     hideLoading();
     const query = [parsed.name, parsed.number].filter(Boolean).join(' ');
     document.getElementById('manualInput').value = query;
@@ -338,23 +429,16 @@ document.getElementById('manualInput').addEventListener('keydown', e => {
 async function searchCard(query) {
   hideError(); hideResults();
   showLoading("Recherche des prix Cardmarket...");
-
   const lang = document.getElementById('filterLang').value;
   const condition = document.getElementById('filterCondition').value;
 
   try {
-    // Appel à notre fonction Vercel
     const apiUrl = `/api/prices?name=${encodeURIComponent(query)}&lang=${lang}&condition=${condition}`;
     const res = await fetch(apiUrl);
     const data = await res.json();
-
-    if (!res.ok || data.error) {
-      throw new Error(data.error || 'Erreur lors de la recherche');
-    }
-
+    if (!res.ok || data.error) throw new Error(data.error || 'Erreur lors de la recherche');
     hideLoading();
     showResults(query, data, lang, condition);
-
   } catch(e) {
     hideLoading();
     showError(e.message || 'Erreur réseau. Vérifie ta connexion.');
@@ -365,7 +449,7 @@ async function searchCard(query) {
 function showResults(query, data, lang, condition) {
   document.getElementById('cardName').textContent = data.cardName || query;
   document.getElementById('cardMeta').textContent =
-    `${LANG_LABELS[lang]} · ${COND_LABELS[condition]} · ${data.prices.length} offre(s) trouvée(s)`;
+    `${LANG_LABELS[lang]} · ${COND_LABELS[condition]} · ${data.prices.length} offre(s)`;
 
   const list = document.getElementById('pricesList');
   list.innerHTML = '';
@@ -380,10 +464,7 @@ function showResults(query, data, lang, condition) {
     list.appendChild(item);
   });
 
-  if (data.productUrl) {
-    document.getElementById('cardmarketLink').href = data.productUrl;
-  }
-
+  if (data.productUrl) document.getElementById('cardmarketLink').href = data.productUrl;
   document.getElementById('results').classList.add('visible');
 }
 
