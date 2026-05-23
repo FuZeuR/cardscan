@@ -25,46 +25,53 @@ export default async function handler(req) {
   };
 
   try {
-    // ── ACTION 1 : suggestions de recherche ──────────────
+
+    // ── ACTION 1 : suggestions ───────────────────────────
     if (action === 'suggest') {
       if (!query) return new Response(JSON.stringify({ results: [] }), { status: 200, headers });
 
-      const url = `https://www.cardmarket.com/fr/Pokemon/Products/Search?searchString=${encodeURIComponent(query)}`;
-      const res = await fetch(url, { headers: fetchHeaders });
+      const searchUrl = `https://www.cardmarket.com/fr/Pokemon/Products/Search?searchString=${encodeURIComponent(query)}`;
+      const res = await fetch(searchUrl, { headers: fetchHeaders });
       if (!res.ok) throw new Error(`Cardmarket inaccessible (${res.status})`);
       const html = await res.text();
 
-      // Extraction des résultats de recherche
       const results = [];
-      // Pattern pour les cartes dans les résultats de recherche Cardmarket
-      const cardPattern = /href="(\/fr\/Pokemon\/Products\/Singles\/[^"]+)"[^>]*>[\s\S]*?<span[^>]*>([^<]+)<\/span>/gi;
+
+      // Pattern principal : liens vers Singles avec le nom en strong/titre
+      // Structure Cardmarket : <a href="/fr/Pokemon/Products/Singles/SET/CARD-NAME" ...><strong>Nom (SET 000)</strong>
+      const mainPattern = /<a[^>]+href="(\/fr\/Pokemon\/Products\/Singles\/[^"?]+)"[^>]*>[\s\S]*?<strong[^>]*>([\s\S]*?)<\/strong>/gi;
       let match;
-      while ((match = cardPattern.exec(html)) !== null && results.length < 15) {
+      while ((match = mainPattern.exec(html)) !== null) {
         const path = match[1];
-        const name = match[2].trim();
-        if (name && !results.find(r => r.path === path)) {
-          results.push({ name, path, url: `https://www.cardmarket.com${path}` });
+        const rawName = match[2].replace(/<[^>]+>/g, '').trim();
+        if (
+          rawName &&
+          rawName.length > 2 &&
+          !rawName.match(/^(Page|Voir|Trier|Plus|All|Tout)/i) &&
+          !results.find(r => r.path === path)
+        ) {
+          results.push({ name: rawName, path, url: `https://www.cardmarket.com${path}` });
         }
+        if (results.length >= 20) break;
       }
 
-      // Fallback : extraction plus large si le pattern précédent ne trouve rien
+      // Fallback si le pattern principal ne trouve rien
       if (results.length === 0) {
-        const fallback = /href="(\/fr\/Pokemon\/Products\/Singles\/([^"\/]+)\/([^"]+))"/gi;
-        while ((match = fallback.exec(html)) !== null && results.length < 15) {
+        const fallbackPattern = /<a[^>]+href="(\/fr\/Pokemon\/Products\/Singles\/([^"?\/]+)\/([^"?\/]+))[^"]*"[^>]*title="([^"]+)"/gi;
+        while ((match = fallbackPattern.exec(html)) !== null) {
           const path = match[1];
-          const setSlug = match[2];
-          const cardSlug = match[3].split('?')[0];
-          const name = cardSlug.replace(/-/g, ' ');
-          if (!results.find(r => r.path === path)) {
+          const name = match[4].trim();
+          if (name && !results.find(r => r.path === path)) {
             results.push({ name, path, url: `https://www.cardmarket.com${path}` });
           }
+          if (results.length >= 20) break;
         }
       }
 
-      return new Response(JSON.stringify({ results, searchUrl: url }), { status: 200, headers });
+      return new Response(JSON.stringify({ results, searchUrl, total: results.length }), { status: 200, headers });
     }
 
-    // ── ACTION 2 : prix d'une carte précise ──────────────
+    // ── ACTION 2 : prix ──────────────────────────────────
     if (action === 'prices') {
       if (!productUrl) return new Response(JSON.stringify({ error: 'URL manquante' }), { status: 400, headers });
 
@@ -79,11 +86,12 @@ export default async function handler(req) {
       const prices = [];
       const pricePattern = /([0-9]+,[0-9]{2})\s*€/g;
       let match;
-      while ((match = pricePattern.exec(html)) !== null && prices.length < 20) {
+      while ((match = pricePattern.exec(html)) !== null) {
         const price = parseFloat(match[1].replace(',', '.'));
         if (price > 0.01 && price < 10000 && !prices.includes(price)) {
           prices.push(price);
         }
+        if (prices.length >= 20) break;
       }
 
       prices.sort((a, b) => a - b);
@@ -96,10 +104,7 @@ export default async function handler(req) {
         }), { status: 404, headers });
       }
 
-      return new Response(JSON.stringify({
-        prices: top5,
-        productUrl: filteredUrl
-      }), { status: 200, headers });
+      return new Response(JSON.stringify({ prices: top5, productUrl: filteredUrl }), { status: 200, headers });
     }
 
     return new Response(JSON.stringify({ error: 'Action inconnue' }), { status: 400, headers });
