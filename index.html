@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0a0f">
+<title>CardScan – Prix Cardmarket</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap');
+  :root {
+    --bg: #0a0a0f; --surface: #13131a; --surface2: #1c1c26;
+    --border: #2a2a3a; --accent: #FFCB05; --accent2: #2A75BB;
+    --red: #E3350D; --text: #f0f0f5; --muted: #6b6b80; --radius: 14px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; background:var(--bg); color:var(--text); font-family:'Syne',sans-serif; }
+  body { display:flex; flex-direction:column; min-height:100svh; }
+
+  header {
+    padding:18px 20px 14px; display:flex; align-items:center;
+    justify-content:space-between; border-bottom:1px solid var(--border);
+    background:var(--surface);
+  }
+  .logo { display:flex; align-items:center; gap:10px; }
+  .logo-ball {
+    width:30px; height:30px; border-radius:50%;
+    background:linear-gradient(180deg,var(--red) 50%,white 50%);
+    border:2px solid var(--border); position:relative; flex-shrink:0;
+  }
+  .logo-ball::after {
+    content:''; position:absolute; top:50%; left:50%;
+    transform:translate(-50%,-50%); width:8px; height:8px;
+    border-radius:50%; background:var(--bg); border:1.5px solid var(--border);
+  }
+  .logo-text { font-size:20px; font-weight:800; letter-spacing:-0.5px; }
+  .logo-text span { color:var(--accent); }
+
+  main { flex:1; padding:20px; display:flex; flex-direction:column; gap:16px; max-width:500px; margin:0 auto; width:100%; }
+
+  .scanner-section { background:var(--surface); border-radius:var(--radius); border:1px solid var(--border); overflow:hidden; }
+  .camera-wrap { position:relative; width:100%; aspect-ratio:4/3; background:#000; display:flex; align-items:center; justify-content:center; }
+  #video { width:100%; height:100%; object-fit:cover; display:none; }
+  #canvas { display:none; }
+  .camera-placeholder { display:flex; flex-direction:column; align-items:center; gap:10px; color:var(--muted); }
+  .camera-placeholder svg { opacity:0.4; }
+
+  .scan-overlay { position:absolute; inset:0; pointer-events:none; display:none; }
+  .scan-overlay.active { display:block; }
+  .scan-frame {
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:220px; height:55px; border:2px solid var(--accent); border-radius:6px;
+    box-shadow:0 0 0 2000px rgba(0,0,0,0.5);
+  }
+  .scan-line {
+    position:absolute; top:0; left:0; right:0; height:2px;
+    background:var(--accent); animation:scanline 1.5s ease-in-out infinite;
+    box-shadow:0 0 8px var(--accent);
+  }
+  @keyframes scanline { 0%{top:0} 50%{top:calc(100% - 2px)} 100%{top:0} }
+  .scan-hint { position:absolute; bottom:10px; left:0; right:0; text-align:center; font-size:11px; color:rgba(255,255,255,0.7); font-family:'DM Mono',monospace; }
+
+  .scanner-controls { padding:14px 16px; display:flex; gap:10px; }
+  .btn-main {
+    flex:1; padding:12px; border-radius:10px; border:none;
+    font-family:'Syne',sans-serif; font-weight:700; font-size:14px;
+    cursor:pointer; transition:all 0.2s; display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .btn-scan { background:var(--accent); color:#000; }
+  .btn-scan:active { transform:scale(0.97); }
+  .btn-stop { background:var(--red); color:white; display:none; }
+  .btn-capture { background:var(--accent2); color:white; display:none; }
+
+  .filters { background:var(--surface); border-radius:var(--radius); border:1px solid var(--border); padding:14px 16px; }
+  .filters-title { font-size:11px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); margin-bottom:12px; }
+  .filters-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .filter-group { display:flex; flex-direction:column; gap:5px; }
+  .filter-label { font-size:11px; color:var(--muted); font-family:'DM Mono',monospace; }
+  select {
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); font-family:'Syne',sans-serif; font-size:13px; padding:8px 10px;
+    appearance:none; -webkit-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b6b80'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 10px center; cursor:pointer;
+  }
+
+  .divider { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:11px; font-family:'DM Mono',monospace; }
+  .divider::before,.divider::after { content:''; flex:1; height:1px; background:var(--border); }
+
+  .manual-search { display:flex; gap:8px; }
+  input[type="text"] {
+    flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); font-family:'DM Mono',monospace; font-size:13px; padding:10px 12px; outline:none; transition:border-color 0.2s;
+  }
+  input[type="text"]:focus { border-color:var(--accent2); }
+  input[type="text"]::placeholder { color:var(--muted); }
+  .btn-search {
+    background:var(--accent2); color:white; border:none; border-radius:8px;
+    padding:10px 14px; font-family:'Syne',sans-serif; font-weight:700; font-size:13px;
+    cursor:pointer; white-space:nowrap; transition:all 0.2s;
+  }
+  .btn-search:active { transform:scale(0.97); }
+
+  .loading { display:none; align-items:center; justify-content:center; gap:12px; padding:24px; background:var(--surface); border-radius:var(--radius); border:1px solid var(--border); }
+  .loading.visible { display:flex; }
+  .spinner { width:20px; height:20px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.7s linear infinite; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  .loading-text { font-size:13px; color:var(--muted); font-family:'DM Mono',monospace; }
+
+  .error-box { display:none; padding:14px 16px; background:rgba(227,53,13,0.1); border:1px solid rgba(227,53,13,0.3); border-radius:var(--radius); font-size:13px; color:#ff7a5c; font-family:'DM Mono',monospace; }
+  .error-box.visible { display:block; }
+
+  .results-section { display:none; flex-direction:column; gap:10px; }
+  .results-section.visible { display:flex; }
+
+  .card-identified { background:var(--surface); border-radius:var(--radius); border:1px solid var(--border); padding:14px 16px; }
+  .card-name { font-size:16px; font-weight:800; margin-bottom:4px; }
+  .card-meta { font-size:12px; color:var(--muted); font-family:'DM Mono',monospace; }
+
+  .section-label { font-size:11px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); padding:0 2px; }
+
+  .prices-list { display:flex; flex-direction:column; gap:8px; }
+  .price-item {
+    background:var(--surface); border-radius:10px; border:1px solid var(--border);
+    padding:12px 16px; display:flex; align-items:center; justify-content:space-between;
+    animation:fadeUp 0.3s ease both;
+  }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+  .price-item:nth-child(1){animation-delay:0.05s}
+  .price-item:nth-child(2){animation-delay:0.10s}
+  .price-item:nth-child(3){animation-delay:0.15s}
+  .price-item:nth-child(4){animation-delay:0.20s}
+  .price-item:nth-child(5){animation-delay:0.25s}
+
+  .price-rank { width:24px; height:24px; border-radius:50%; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:var(--muted); flex-shrink:0; }
+  .price-item:first-child .price-rank { background:var(--accent); color:#000; }
+  .price-value { font-size:20px; font-weight:800; font-family:'DM Mono',monospace; }
+  .price-item:first-child .price-value { color:var(--accent); }
+  .price-tag { font-size:11px; color:var(--muted); font-family:'DM Mono',monospace; text-align:right; }
+
+  .cardmarket-btn {
+    display:inline-flex; align-items:center; gap:6px; padding:10px 16px;
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); font-family:'Syne',sans-serif; font-size:13px; font-weight:700;
+    text-decoration:none; cursor:pointer; transition:all 0.2s;
+  }
+  .cardmarket-btn:active { transform:scale(0.97); }
+
+  footer { padding:12px 20px; text-align:center; font-size:10px; color:var(--muted); font-family:'DM Mono',monospace; border-top:1px solid var(--border); }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <div class="logo-ball"></div>
+    <div class="logo-text">Card<span>Scan</span></div>
+  </div>
+  <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;">Domaine Des Cartes</div>
+</header>
+
+<main>
+  <div class="scanner-section">
+    <div class="camera-wrap">
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas"></canvas>
+      <div class="camera-placeholder" id="placeholder">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+        <span style="font-size:13px;">Appuie pour scanner</span>
+      </div>
+      <div class="scan-overlay" id="scanOverlay">
+        <div class="scan-frame"><div class="scan-line"></div></div>
+        <div class="scan-hint">Cadre le numéro en bas de la carte (ex: 025/198)</div>
+      </div>
+    </div>
+    <div class="scanner-controls">
+      <button class="btn-main btn-scan" id="btnScan" onclick="startCamera()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+        Scanner une carte
+      </button>
+      <button class="btn-main btn-capture" id="btnCapture" onclick="captureAndSearch()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/></svg>
+        Capturer
+      </button>
+      <button class="btn-main btn-stop" id="btnStop" onclick="stopCamera()">Arrêter</button>
+    </div>
+  </div>
+
+  <div class="filters">
+    <div class="filters-title">Filtres Cardmarket</div>
+    <div class="filters-row">
+      <div class="filter-group">
+        <span class="filter-label">Langue</span>
+        <select id="filterLang">
+          <option value="F" selected>🇫🇷 Français</option>
+          <option value="G">🇩🇪 Allemand</option>
+          <option value="E">🇬🇧 Anglais</option>
+          <option value="I">🇮🇹 Italien</option>
+          <option value="S">🇪🇸 Espagnol</option>
+          <option value="P">🇵🇹 Portugais</option>
+          <option value="J">🇯🇵 Japonais</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">État minimum</span>
+        <select id="filterCondition">
+          <option value="EX" selected>Excellent</option>
+          <option value="NM">Near Mint</option>
+          <option value="GD">Bon état</option>
+          <option value="LP">Légèrement joué</option>
+          <option value="PL">Joué</option>
+          <option value="PO">Pauvre</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider">ou recherche manuelle</div>
+
+  <div class="manual-search">
+    <input type="text" id="manualInput" placeholder="Nom ou numéro (ex: Dracaufeu 025/198)" />
+    <button class="btn-search" onclick="searchManual()">Chercher</button>
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <span class="loading-text">Chargement...</span>
+  </div>
+
+  <div class="error-box" id="errorBox"></div>
+
+  <div class="results-section" id="results">
+    <div class="card-identified">
+      <div class="card-name" id="cardName">—</div>
+      <div class="card-meta" id="cardMeta">—</div>
+    </div>
+    <div class="section-label">5 prix les plus bas</div>
+    <div class="prices-list" id="pricesList"></div>
+    <a class="cardmarket-btn" id="cardmarketLink" href="#" target="_blank">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      Voir sur Cardmarket
+    </a>
+  </div>
+</main>
+
+<footer>CardScan · Domaine Des Cartes · Caudry</footer>
+
+<script>
+let stream = null;
+const LANG_LABELS = { F:'Français', G:'Allemand', E:'Anglais', I:'Italien', S:'Espagnol', P:'Portugais', J:'Japonais' };
+const COND_LABELS = { EX:'Excellent', NM:'Near Mint', GD:'Bon état', LP:'Légèrement joué', PL:'Joué', PO:'Pauvre' };
+
+// ── CAMÉRA ──────────────────────────────────────────
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode:'environment', width:{ideal:1280}, height:{ideal:960} }
+    });
+    const video = document.getElementById('video');
+    video.srcObject = stream;
+    video.style.display = 'block';
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('scanOverlay').classList.add('active');
+    document.getElementById('btnScan').style.display = 'none';
+    document.getElementById('btnCapture').style.display = 'flex';
+    document.getElementById('btnStop').style.display = 'flex';
+  } catch(e) {
+    showError("Impossible d'accéder à la caméra. Vérifie les permissions.");
+  }
+}
+
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  document.getElementById('video').style.display = 'none';
+  document.getElementById('placeholder').style.display = 'flex';
+  document.getElementById('scanOverlay').classList.remove('active');
+  document.getElementById('btnScan').style.display = 'flex';
+  document.getElementById('btnCapture').style.display = 'none';
+  document.getElementById('btnStop').style.display = 'none';
+}
+
+async function captureAndSearch() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const imageData = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+  stopCamera();
+  showLoading("Lecture du numéro de carte...");
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 150,
+        messages: [{
+          role: "user",
+          content: [
+            { type:"image", source:{ type:"base64", media_type:"image/jpeg", data:imageData } },
+            { type:"text", text:'Lis le numéro et le nom de cette carte Pokémon. Réponds UNIQUEMENT en JSON: {"name":"Dracaufeu","number":"025/198","set":"SVI"} ou {"error":"non trouvé"}' }
+          ]
+        }]
+      })
+    });
+    const data = await response.json();
+    const text = data.content?.find(b => b.type==='text')?.text || '';
+    const match = text.match(/\{[\s\S]*?\}/);
+    if (!match) throw new Error("Lecture impossible");
+    const parsed = JSON.parse(match[0]);
+    if (parsed.error) throw new Error("Numéro non lisible, essaie la recherche manuelle");
+    hideLoading();
+    const query = [parsed.name, parsed.number].filter(Boolean).join(' ');
+    document.getElementById('manualInput').value = query;
+    await searchCard(query);
+  } catch(e) {
+    hideLoading();
+    showError(e.message);
+  }
+}
+
+// ── RECHERCHE ────────────────────────────────────────
+async function searchManual() {
+  const query = document.getElementById('manualInput').value.trim();
+  if (!query) return;
+  await searchCard(query);
+}
+
+document.getElementById('manualInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') searchManual();
+});
+
+async function searchCard(query) {
+  hideError(); hideResults();
+  showLoading("Recherche des prix Cardmarket...");
+
+  const lang = document.getElementById('filterLang').value;
+  const condition = document.getElementById('filterCondition').value;
+
+  try {
+    // Appel à notre fonction Vercel
+    const apiUrl = `/api/prices?name=${encodeURIComponent(query)}&lang=${lang}&condition=${condition}`;
+    const res = await fetch(apiUrl);
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      throw new Error(data.error || 'Erreur lors de la recherche');
+    }
+
+    hideLoading();
+    showResults(query, data, lang, condition);
+
+  } catch(e) {
+    hideLoading();
+    showError(e.message || 'Erreur réseau. Vérifie ta connexion.');
+  }
+}
+
+// ── AFFICHAGE ────────────────────────────────────────
+function showResults(query, data, lang, condition) {
+  document.getElementById('cardName').textContent = data.cardName || query;
+  document.getElementById('cardMeta').textContent =
+    `${LANG_LABELS[lang]} · ${COND_LABELS[condition]} · ${data.prices.length} offre(s) trouvée(s)`;
+
+  const list = document.getElementById('pricesList');
+  list.innerHTML = '';
+  data.prices.forEach((price, i) => {
+    const item = document.createElement('div');
+    item.className = 'price-item';
+    item.innerHTML = `
+      <div class="price-rank">${i+1}</div>
+      <div class="price-value">${price.toFixed(2)} €</div>
+      <div class="price-tag">${COND_LABELS[condition]}<br>${LANG_LABELS[lang]}</div>
+    `;
+    list.appendChild(item);
+  });
+
+  if (data.productUrl) {
+    document.getElementById('cardmarketLink').href = data.productUrl;
+  }
+
+  document.getElementById('results').classList.add('visible');
+}
+
+function hideResults() { document.getElementById('results').classList.remove('visible'); }
+function showLoading(msg) {
+  const el = document.getElementById('loading');
+  el.querySelector('.loading-text').textContent = msg;
+  el.classList.add('visible');
+}
+function hideLoading() { document.getElementById('loading').classList.remove('visible'); }
+function showError(msg) {
+  const el = document.getElementById('errorBox');
+  el.textContent = '⚠ ' + msg;
+  el.classList.add('visible');
+}
+function hideError() { document.getElementById('errorBox').classList.remove('visible'); }
+</script>
+</body>
+</html>
