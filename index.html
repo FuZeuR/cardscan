@@ -282,7 +282,7 @@ async function startCamera() {
     // Demande la résolution max pour avoir le plus de détails possible
     stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: 'environment',
+        facingMode: { exact: 'environment' },
         width: { ideal: 3264 },
         height: { ideal: 2448 },
       }
