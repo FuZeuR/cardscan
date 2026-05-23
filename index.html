@@ -279,10 +279,14 @@ const COND_LABELS = { EX:'Excellent', NM:'Near Mint', GD:'Bon état', LP:'Légè
 // ── CAMÉRA ──────────────────────────────────────────
 async function startCamera() {
   try {
-    // Demande la résolution max pour avoir le plus de détails possible
+    // Liste toutes les caméras et prend la dernière (arrière sur Android)
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter(d => d.kind === 'videoinput');
+    const backCamera = cameras[cameras.length - 1];
+
     stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: { exact: 'environment' },
+        deviceId: backCamera ? { exact: backCamera.deviceId } : undefined,
         width: { ideal: 3264 },
         height: { ideal: 2448 },
       }
