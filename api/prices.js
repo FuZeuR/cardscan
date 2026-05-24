@@ -12,17 +12,24 @@ export default async function handler(req) {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
 
   const { searchParams } = new URL(req.url);
-  const action = searchParams.get('action') || 'search';
+  const action = searchParams.get('action') || 'suggest';
   const query = searchParams.get('q') || '';
   const lang = searchParams.get('lang') || 'F';
   const condition = searchParams.get('condition') || 'EX';
   const productUrl = searchParams.get('url') || '';
 
-  const fetchHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'fr-FR,fr;q=0.9',
-  };
+  const apiKey = process.env.SCRAPER_API_KEY;
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: 'Clé API manquante — configure SCRAPER_API_KEY dans Vercel.' }), { status: 500, headers });
+  }
+
+  async function scrape(targetUrl) {
+    const scraperUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(targetUrl)}&render=false`;
+    const res = await fetch(scraperUrl);
+    if (res.status === 403) throw new Error('quota_exceeded');
+    if (!res.ok) throw new Error(`Erreur ScraperAPI (${res.status})`);
+    return res.text();
+  }
 
   try {
 
@@ -31,41 +38,34 @@ export default async function handler(req) {
       if (!query) return new Response(JSON.stringify({ results: [] }), { status: 200, headers });
 
       const searchUrl = `https://www.cardmarket.com/fr/Pokemon/Products/Search?searchString=${encodeURIComponent(query)}`;
-      const res = await fetch(searchUrl, { headers: fetchHeaders });
-      if (!res.ok) throw new Error(`Cardmarket inaccessible (${res.status})`);
-      const html = await res.text();
+      let html;
+      try {
+        html = await scrape(searchUrl);
+      } catch(e) {
+        if (e.message === 'quota_exceeded') {
+          return new Response(JSON.stringify({
+            error: 'quota_exceeded',
+            message: 'Limite mensuelle atteinte (1000 requêtes gratuites). Renouvellement le 1er du mois prochain.'
+          }), { status: 429, headers });
+        }
+        throw e;
+      }
 
       const results = [];
 
-      // Pattern principal : liens vers Singles avec le nom en strong/titre
-      // Structure Cardmarket : <a href="/fr/Pokemon/Products/Singles/SET/CARD-NAME" ...><strong>Nom (SET 000)</strong>
-      const mainPattern = /<a[^>]+href="(\/fr\/Pokemon\/Products\/Singles\/[^"?]+)"[^>]*>[\s\S]*?<strong[^>]*>([\s\S]*?)<\/strong>/gi;
+      // Pattern exact basé sur le vrai HTML de Cardmarket :
+      // <a href="/fr/Pokemon/Products/Singles/SET/CARD" class="card ... galleryBox">
+      // ...
+      // <h2 class="card-title h3">...[icon]...&nbsp;NOM DE LA CARTE  (SET 000)</h2>
+      const pattern = /<a\s+href="(\/fr\/Pokemon\/Products\/Singles\/[^"]+)"\s+class="[^"]*galleryBox[^"]*">[\s\S]*?<h2[^>]*>[\s\S]*?&nbsp;([^<]+)<\/h2>/gi;
       let match;
-      while ((match = mainPattern.exec(html)) !== null) {
+      while ((match = pattern.exec(html)) !== null) {
         const path = match[1];
-        const rawName = match[2].replace(/<[^>]+>/g, '').trim();
-        if (
-          rawName &&
-          rawName.length > 2 &&
-          !rawName.match(/^(Page|Voir|Trier|Plus|All|Tout)/i) &&
-          !results.find(r => r.path === path)
-        ) {
-          results.push({ name: rawName, path, url: `https://www.cardmarket.com${path}` });
+        const name = match[2].trim();
+        if (name && name.length > 1 && !results.find(r => r.path === path)) {
+          results.push({ name, path, url: `https://www.cardmarket.com${path}` });
         }
-        if (results.length >= 20) break;
-      }
-
-      // Fallback si le pattern principal ne trouve rien
-      if (results.length === 0) {
-        const fallbackPattern = /<a[^>]+href="(\/fr\/Pokemon\/Products\/Singles\/([^"?\/]+)\/([^"?\/]+))[^"]*"[^>]*title="([^"]+)"/gi;
-        while ((match = fallbackPattern.exec(html)) !== null) {
-          const path = match[1];
-          const name = match[4].trim();
-          if (name && !results.find(r => r.path === path)) {
-            results.push({ name, path, url: `https://www.cardmarket.com${path}` });
-          }
-          if (results.length >= 20) break;
-        }
+        if (results.length >= 30) break;
       }
 
       return new Response(JSON.stringify({ results, searchUrl, total: results.length }), { status: 200, headers });
@@ -79,9 +79,18 @@ export default async function handler(req) {
       const condId = COND_MAP[condition] || '2';
       const filteredUrl = `${productUrl}?idLanguage=${langId}&minCondition=${condId}`;
 
-      const res = await fetch(filteredUrl, { headers: fetchHeaders });
-      if (!res.ok) throw new Error(`Cardmarket inaccessible (${res.status})`);
-      const html = await res.text();
+      let html;
+      try {
+        html = await scrape(filteredUrl);
+      } catch(e) {
+        if (e.message === 'quota_exceeded') {
+          return new Response(JSON.stringify({
+            error: 'quota_exceeded',
+            message: 'Limite mensuelle atteinte (1000 requêtes gratuites). Renouvellement le 1er du mois prochain.'
+          }), { status: 429, headers });
+        }
+        throw e;
+      }
 
       const prices = [];
       const pricePattern = /([0-9]+,[0-9]{2})\s*€/g;
