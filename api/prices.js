@@ -1,7 +1,48 @@
 export const config = { runtime: 'edge' };
 
-const LANG_MAP = { F: '4', G: '3', E: '1', I: '7', S: '5', P: '9', J: '10' };
-const COND_MAP = { NM: '1', EX: '2', GD: '3', LP: '4', PL: '5', PO: '6' };
+// Codes langue Cardmarket (idLanguage dans l'URL)
+const LANG_MAP = {
+  F: '2',   // Français
+  E: '1',   // Anglais
+  G: '3',   // Allemand
+  S: '4',   // Espagnol
+  I: '5',   // Italien
+  PT: '8',  // Portugais
+  KO: '9',  // Coréen
+  TW: '10', // Chinois traditionnel
+  SC: '11', // Chinois simplifié
+  J: '6',   // Japonais
+  PL: '12', // Polonais
+  RU: '13', // Russe
+};
+
+// Positions du sprite des drapeaux dans le CSS Cardmarket
+// background-position dans ssMain2.png
+const LANG_FLAG_POS = {
+  '1': '-16px -0px',   // Anglais
+  '2': '-32px -0px',   // Français
+  '3': '-48px -0px',   // Allemand
+  '4': '-64px -0px',   // Espagnol
+  '5': '-80px -0px',   // Italien
+  '6': '-96px -0px',   // Japonais
+  '7': '-112px -0px',  // Chinois simplifié
+  '8': '-128px -0px',  // Portugais
+  '9': '-144px -0px',  // Coréen
+  '10': '-160px -0px', // Chinois traditionnel
+  '11': '-176px -0px', // Polonais
+  '12': '-192px -0px', // Russe
+};
+
+// Codes condition Cardmarket
+const COND_MAP = {
+  MT: '1',  // Mint
+  NM: '2',  // Near Mint
+  EX: '3',  // Excellent
+  GD: '4',  // Good
+  LP: '5',  // Light Played
+  PL: '6',  // Played
+  PO: '7',  // Poor
+};
 
 export default async function handler(req) {
   const headers = {
@@ -20,7 +61,7 @@ export default async function handler(req) {
 
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'Clé API manquante — configure SCRAPER_API_KEY dans Vercel.' }), { status: 500, headers });
+    return new Response(JSON.stringify({ error: 'Clé API manquante.' }), { status: 500, headers });
   }
 
   async function scrape(targetUrl) {
@@ -52,12 +93,7 @@ export default async function handler(req) {
       }
 
       const results = [];
-
-      // Pattern exact basé sur le vrai HTML de Cardmarket :
-      // <a href="/fr/Pokemon/Products/Singles/SET/CARD" class="card ... galleryBox">
-      // ...
-      // <h2 class="card-title h3">...[icon]...&nbsp;NOM DE LA CARTE  (SET 000)</h2>
-      const pattern = /<a\s+href="(\/fr\/Pokemon\/Products\/Singles\/[^"]+)"\s+class="[^"]*galleryBox[^"]*">[\s\S]*?<h2[^>]*>[\s\S]*?&nbsp;([^<]+)<\/h2>/gi;
+      const pattern = /<a\s+href="(\/fr\/Pokemon\/Products\/Singles\/[^"?]+)"\s+class="[^"]*galleryBox[^"]*">[\s\S]*?&nbsp;([^<]+)<\/h2>/gi;
       let match;
       while ((match = pattern.exec(html)) !== null) {
         const path = match[1];
@@ -71,12 +107,12 @@ export default async function handler(req) {
       return new Response(JSON.stringify({ results, searchUrl, total: results.length }), { status: 200, headers });
     }
 
-    // ── ACTION 2 : prix ──────────────────────────────────
+    // ── ACTION 2 : prix filtrés par langue ET condition ──
     if (action === 'prices') {
       if (!productUrl) return new Response(JSON.stringify({ error: 'URL manquante' }), { status: 400, headers });
 
-      const langId = LANG_MAP[lang] || '4';
-      const condId = COND_MAP[condition] || '2';
+      const langId = LANG_MAP[lang] || '2';
+      const condId = COND_MAP[condition] || '3';
       const filteredUrl = `${productUrl}?idLanguage=${langId}&minCondition=${condId}`;
 
       let html;
@@ -92,15 +128,46 @@ export default async function handler(req) {
         throw e;
       }
 
+      // Découpage par ligne d'article
       const prices = [];
-      const pricePattern = /([0-9]+,[0-9]{2})\s*€/g;
-      let match;
-      while ((match = pricePattern.exec(html)) !== null) {
-        const price = parseFloat(match[1].replace(',', '.'));
-        if (price > 0.01 && price < 10000 && !prices.includes(price)) {
+      const langFlagPos = LANG_FLAG_POS[langId];
+
+      // Pattern pour chaque ligne article
+      const rowPattern = /class="row g-0 article-row">([\s\S]*?)(?=class="row g-0 article-row"|table-footer|loadMore)/g;
+      let rowMatch;
+
+      while ((rowMatch = rowPattern.exec(html)) !== null) {
+        const rowHtml = rowMatch[1];
+
+        // Vérifier la langue : chercher la position du drapeau dans cette ligne
+        // ssMain2.png contient les drapeaux avec des background-position spécifiques
+        const hasLang = langFlagPos
+          ? rowHtml.includes(`background-position: ${langFlagPos}`) ||
+            rowHtml.includes(`background-position:${langFlagPos}`)
+          : true;
+
+        if (!hasLang) continue;
+
+        // Extraire le prix
+        const priceMatch = rowHtml.match(/fw-bold[^"]*">\s*([0-9]+,[0-9]{2})\s*€/);
+        if (!priceMatch) continue;
+
+        const price = parseFloat(priceMatch[1].replace(',', '.'));
+        if (price > 0 && price < 10000) {
           prices.push(price);
         }
+
         if (prices.length >= 20) break;
+      }
+
+      // Fallback si le filtre par drapeau n'a rien trouvé
+      if (prices.length === 0) {
+        const fallbackPattern = /fw-bold[^"]*">\s*([0-9]+,[0-9]{2})\s*€/g;
+        let m;
+        while ((m = fallbackPattern.exec(html)) !== null && prices.length < 20) {
+          const price = parseFloat(m[1].replace(',', '.'));
+          if (price > 0 && price < 10000) prices.push(price);
+        }
       }
 
       prices.sort((a, b) => a - b);
