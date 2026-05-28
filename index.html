@@ -248,7 +248,7 @@ async function doSearch() {
   showLoading("Recherche sur Cardmarket...");
 
   try {
-    const res = await fetch(`/api/prices?action=suggest&q=${encodeURIComponent(query)}`);
+    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
     const data = await res.json();
     hideLoading();
 
