@@ -16,11 +16,14 @@ export default async function handler(req) {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) return new Response(JSON.stringify({ error: 'Clé API manquante.' }), { status: 500, headers });
 
-  const searchUrl = `https://www.cardmarket.com/fr/Pokemon/Products/Search?searchString=${encodeURIComponent(query)}`;
+  const searchUrl = `https://www.cardmarket.com/fr/Pokemon/Products/Search?searchString=${encodeURIComponent(query)}&idCategory=51`;
 
   try {
-    const scraperUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(searchUrl)}&render=false`;
-    const res = await fetch(scraperUrl);
+    const scraperUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(searchUrl)}&render=false&timeout=8000`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(scraperUrl, { signal: controller.signal });
+    clearTimeout(timeout);
 
     if (res.status === 403) {
       return new Response(JSON.stringify({
